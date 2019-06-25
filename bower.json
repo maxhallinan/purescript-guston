@@ -11,7 +11,12 @@
     "purescript-console": "^4.2.0",
     "purescript-effect": "^2.0.1",
     "purescript-foldable-traversable": "^4.1.1",
-    "purescript-ordered-collections": "^1.6.1"
+    "purescript-ordered-collections": "^1.6.1",
+    "purescript-parsing": "^5.0.3",
+    "purescript-control": "^4.1.0",
+    "purescript-strings": "^4.0.1",
+    "purescript-arrays": "^5.3.0",
+    "purescript-functors": "^3.1.1"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"

@@ -1,36 +1,45 @@
-module Expr 
-  ( Expr(..)
-  , XExprF(..)
-  , Info
+module Expr
+  ( Ann(..)
   , Env
+  , Expr(..)
+  , ExprAnnF(..)
   , ExprF(..)
+  , Location
+  , Position
   , SpecialForm(..)
   ) where
 
 import Prelude
+import Data.Functor.Compose (Compose(..))
 import Data.Map as M
 import Data.Newtype (class Newtype, unwrap)
 import Mu (Mu)
 import Util (concatStrings, unwords)
 
-type Expr = Mu XExprF
+type Expr = Mu (Compose ExprAnnF ExprF)
 
-data XExprF a = XExprF a Info
+data ExprAnnF a = ExprAnnF a Ann
 
-instance showXExprF :: Show a => Show (XExprF a) where
-  show (XExprF x _) = show x
+derive instance functorExprAnnF :: Functor ExprAnnF
 
-newtype Info = Info { offsetRange :: OffsetRange }
+instance showExprAnnF :: Show a => Show (ExprAnnF a) where
+  show (ExprAnnF x _) = show x
 
-derive instance newtypeInfo :: Newtype Info _
+newtype Ann = Ann { location :: Location }
 
-type OffsetRange = { line :: Int, col :: Int } 
+derive instance newtypeInfo :: Newtype Ann _
 
-data ExprF a 
+type Location = { begin :: Position, end :: Position }
+
+type Position = { line :: Int, column :: Int }
+
+data ExprF a
   = Sym String
   | SFrm SpecialForm
   | Fn (Env a) (Array a) a
   | Lst (Array a)
+
+derive instance functorExprF :: Functor ExprF
 
 instance showExprF :: Show a => Show (ExprF a) where
   show (Sym s) = s
@@ -38,7 +47,7 @@ instance showExprF :: Show a => Show (ExprF a) where
   show (Fn _ _ _) = "<function>"
   show (Lst xs) = concatStrings [ "(", unwords $ show <$> xs ,")"]
 
-data SpecialForm 
+data SpecialForm
   = First
   | Rest
   | Cons
