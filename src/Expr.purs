@@ -12,6 +12,7 @@ module Expr
 import Prelude
 
 import Data.Functor.Compose (Compose(..))
+import Data.List (List)
 import Data.Map as M
 import Data.Newtype (class Newtype, unwrap)
 import Mu (Mu)
@@ -37,8 +38,8 @@ type Position = { line :: Int, column :: Int }
 data ExprF a
   = Sym String
   | SFrm SpecialForm
-  | Fn (Env a) (Array a) a
-  | Lst (Array a)
+  | Fn (Env a) (List a) a
+  | Lst (List a)
 
 derive instance functorExprF :: Functor ExprF
 

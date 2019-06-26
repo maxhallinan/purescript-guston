@@ -1,12 +1,11 @@
-module Parse where
+module Parser where
 
 import Prelude
 
 import Control.Alt ((<|>))
 import Control.Lazy (fix)
-import Data.Array (cons, many)
 import Data.Either (Either)
-import Data.List (List)
+import Data.List (List(..), manyRec)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Functor.Compose (Compose(..))
 import Expr as E
@@ -17,7 +16,6 @@ import Text.Parsing.Parser.Language as L
 import Text.Parsing.Parser.String as S
 import Text.Parsing.Parser.Token as T
 import Text.Parsing.Parser.Pos (Position(..))
-import Util (words)
 
 type Parser a = P.Parser String a
 
@@ -32,14 +30,14 @@ expr :: Parser E.Expr
 expr = fix $ \p -> symbol <|> quoted p <|> listOf p
 
 listOf :: Parser E.Expr -> Parser E.Expr
-listOf p = exprOf $ E.Lst <$> lexer.parens (many p)
+listOf p = exprOf $ E.Lst <$> lexer.parens (manyRec p)
 
 quoted :: Parser E.Expr -> Parser E.Expr
 quoted p = exprOf $ do
   _ <- S.string "'"
   quote <- exprOf $ pure (E.SFrm E.Quote)
   x <- p
-  pure $ E.Lst [quote, x]
+  pure $ E.Lst (Cons quote (pure x))
 
 symbol :: forall a. Parser E.Expr
 symbol = exprOf $ do
