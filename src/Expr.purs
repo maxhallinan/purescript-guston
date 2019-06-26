@@ -10,6 +10,7 @@ module Expr
   ) where
 
 import Prelude
+
 import Data.Functor.Compose (Compose(..))
 import Data.Map as M
 import Data.Newtype (class Newtype, unwrap)

@@ -3,9 +3,11 @@ module Parse where
 import Prelude
 
 import Control.Alt ((<|>))
-import Data.Array (many)
+import Control.Lazy (fix)
+import Data.Array (cons, many)
+import Data.Either (Either)
+import Data.List (List)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
-import Data.Array (cons)
 import Data.Functor.Compose (Compose(..))
 import Expr as E
 import Mu as M
@@ -19,37 +21,28 @@ import Util (words)
 
 type Parser a = P.Parser String a
 
-langDef :: T.LanguageDef
-langDef = T.LanguageDef (T.unGenLanguageDef L.emptyDef)
-  { commentLine = ";"
-  , identLetter = identLetter
-  , identStart = identStart
-  }
+parseStr :: String -> Either P.ParseError (List E.Expr)
+parseStr = flip P.runParser program
 
-lexer :: T.TokenParser
-lexer = T.makeTokenParser langDef
+program :: Parser (List E.Expr)
+program = C.between lexer.whiteSpace S.eof exprs
+  where exprs = C.sepBy expr lexer.whiteSpace
 
-identStart :: Parser Char
-identStart = T.letter <|> oneOf "!$%&*/:<=>?~_^"
+expr :: Parser E.Expr
+expr = fix $ \p -> symbol <|> quoted p <|> listOf p
 
-identLetter :: Parser Char
-identLetter = identStart <|> T.digit <|> oneOf ".+-"
+listOf :: Parser E.Expr -> Parser E.Expr
+listOf p = exprOf $ E.Lst <$> lexer.parens (many p)
 
-annotate :: forall a. Parser a -> Parser (E.ExprAnnF a)
-annotate p = do
-  begin <- location
-  result <- p
-  end <- location
-  let annotation = E.Ann $ { location: { begin: begin, end: end } }
-  pure $ E.ExprAnnF result annotation
-  where location = P.position >>= (pure <<< unwrapPos)
-        unwrapPos (Position loc) = loc
+quoted :: Parser E.Expr -> Parser E.Expr
+quoted p = exprOf $ do
+  _ <- S.string "'"
+  quote <- exprOf $ pure (E.SFrm E.Quote)
+  x <- p
+  pure $ E.Lst [quote, x]
 
-expr :: Parser (E.ExprF E.Expr) -> Parser E.Expr
-expr = map (M.roll <<< Compose) <<< annotate
-
-symbol :: forall a. Parser (E.ExprF a)
-symbol = do
+symbol :: forall a. Parser E.Expr
+symbol = exprOf $ do
   identifier <- lexer.identifier
   case identifier of
     "::" ->
@@ -72,6 +65,35 @@ symbol = do
       pure $ E.SFrm E.Rest
     _ ->
       pure $ E.Sym identifier
+
+exprOf :: Parser (E.ExprF E.Expr) -> Parser E.Expr
+exprOf = map (M.roll <<< Compose) <<< annotate
+
+annotate :: forall a. Parser a -> Parser (E.ExprAnnF a)
+annotate p = do
+  begin <- location
+  result <- p
+  end <- location
+  let annotation = E.Ann $ { location: { begin: begin, end: end } }
+  pure $ E.ExprAnnF result annotation
+  where location = P.position >>= (pure <<< unwrapPos)
+        unwrapPos (Position loc) = loc
+
+langDef :: T.LanguageDef
+langDef = T.LanguageDef (T.unGenLanguageDef L.emptyDef)
+  { commentLine = ";"
+  , identLetter = identLetter
+  , identStart = identStart
+  }
+
+lexer :: T.TokenParser
+lexer = T.makeTokenParser langDef
+
+identStart :: Parser Char
+identStart = T.letter <|> oneOf "!$%&*/:<=>?~_^"
+
+identLetter :: Parser Char
+identLetter = identStart <|> T.digit <|> oneOf ".+-"
 
 oneOf :: String -> Parser Char
 oneOf = S.oneOf <<< toCharArray
