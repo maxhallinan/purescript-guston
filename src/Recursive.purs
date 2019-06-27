@@ -1,7 +1,8 @@
-module Recursive (class Recursive, project) where
+module Recursive (class Recursive, Algebra, AlgebraM, Attr, CVAlgebra, cata, cataM, histo, project) where
 
 import Prelude
 
+import Data.Traversable (class Traversable, traverse)
 import Data.Newtype (class Newtype, unwrap)
 
 class Functor f <= Recursive t f | t -> f where
@@ -12,6 +13,12 @@ type Algebra f a = f a -> a
 cata :: forall t f a. Recursive t f => Algebra f a -> t -> a
 cata f = go
   where go x = f $ map go $ project x
+
+type AlgebraM m f a = f a -> m a
+
+cataM :: forall t f m a. Recursive t f => Monad m => Traversable f => AlgebraM m f a -> t -> m a 
+cataM f = go
+ where go t = f =<< traverse go (project t)
 
 newtype Attr f a = Attr { attribute :: a, hole :: f (Attr f a) }
 
