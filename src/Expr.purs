@@ -7,6 +7,9 @@ module Expr
   , Location
   , Position
   , SFrm(..)
+  , mkExpr
+  , unExpr
+  , unExpr'
   ) where
 
 import Prelude
@@ -16,14 +19,26 @@ import Data.List (List)
 import Data.Map as M
 import Data.Newtype (class Newtype, unwrap)
 import Data.Traversable (class Foldable, class Traversable, traverseDefault, sequenceDefault, foldl, foldr, foldMap)
-import Mu (Mu)
+import Mu (Mu, roll, unroll)
 import Util (concatStrings, unwords)
 
-type Expr a = Mu (Compose ExprAnnF (ExprF a))
+type Expr = Mu (Compose ExprAnnF ExprF)
 
 data ExprAnnF a = ExprAnnF a Ann
 
 derive instance functorExprAnnF :: Functor ExprAnnF
+
+mkExpr :: ExprF Expr -> Ann -> Expr
+mkExpr e a = roll (Compose (ExprAnnF e a))
+
+unExpr :: Expr -> ExprF Expr
+unExpr = unExprAnnF <<< unExpr'
+
+unExpr' :: Expr -> ExprAnnF (ExprF Expr)
+unExpr' = unwrap <<< unroll
+
+unExprAnnF :: forall a. ExprAnnF a -> a
+unExprAnnF (ExprAnnF x _) = x
 
 instance foldableExprAnnF :: Foldable ExprAnnF where
   foldr f y (ExprAnnF x _) = f x y
@@ -45,15 +60,15 @@ type Location = { begin :: Position, end :: Position }
 
 type Position = { line :: Int, column :: Int }
 
-data ExprF a b
+data ExprF a
   = Sym String
   | SFrm SFrm
-  | Fn (Env a) (List b) b
-  | Lst (List b)
+  | Fn (Env a) (List a) a
+  | Lst (List a)
 
-derive instance functorExprF :: Functor (ExprF a)
+derive instance functorExprF :: Functor ExprF
 
-instance foldableExprF :: Foldable (ExprF a) where
+instance foldableExprF :: Foldable ExprF where
   foldr f y (Sym _) = y
   foldr f y (SFrm _) = y
   foldr f y (Fn env params body) = f body (foldr f y params)
@@ -69,11 +84,11 @@ instance foldableExprF :: Foldable (ExprF a) where
   foldMap f (Fn _ _ _) = mempty
   foldMap f (Lst xs) = foldMap f xs
 
-instance traversableExprF :: Traversable (ExprF a) where
+instance traversableExprF :: Traversable ExprF where
   traverse = traverseDefault
   sequence = sequenceDefault
 
-instance showExprF :: Show b => Show (ExprF a b) where
+instance showExprF :: Show a => Show (ExprF a) where
   show (Sym s) = s
   show (SFrm sform) = show sform
   show (Fn _ _ _) = "<function>"

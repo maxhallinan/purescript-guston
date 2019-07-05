@@ -12,7 +12,7 @@ import Control.Monad.Rec.Class (class MonadRec)
 import Data.Functor.Compose (Compose(..))
 import Data.Identity (Identity)
 import Data.Tuple (Tuple(..))
-import Data.Traversable (sequence)
+import Data.Traversable (class Traversable, sequence, traverse)
 import Data.List (List(..), zipWith)
 import Data.Map as M
 import Data.Maybe (Maybe(..))
@@ -20,6 +20,7 @@ import Mu as Mu
 import Data.Newtype (class Newtype, unwrap)
 import Expr as E
 import Recursive (class Recursive, AlgebraM, cataM)
+import Corecursive (class Corecursive, CoalgebraM)
 
 type Eval a = EvalT Identity a
 
@@ -59,26 +60,26 @@ data ErrName
   | NotPair
   | NotImplemented
 
-evalProgram :: forall t a. Recursive t (Compose E.ExprAnnF (E.ExprF a)) => List t -> Eval (List (Mu.Mu (E.ExprF a)))
+evalProgram :: List E.Expr -> Eval (List E.Expr)
 evalProgram = sequence <<< map eval
 
-eval :: forall t a. Recursive t (Compose E.ExprAnnF (E.ExprF a)) => t -> Eval (Mu.Mu (E.ExprF a))
+eval :: E.Expr -> Eval E.Expr
 eval = cataM evalAlg
 
-evalAlg :: forall a. AlgebraM Eval (Compose E.ExprAnnF (E.ExprF a)) (Mu.Mu (E.ExprF a))
+evalAlg :: AlgebraM Eval (Compose E.ExprAnnF E.ExprF) E.Expr
 evalAlg = worker <<< unwrap where
   worker (E.ExprAnnF exprf ann) =
     case exprf of
       (E.Sym name) ->
         evalSym ann name
-      (E.Lst (Cons (Mu.In (E.SFrm sfrm)) args)) ->
+      (E.Lst (Cons (Mu.In (Compose (E.ExprAnnF (E.SFrm sfrm) _))) args)) ->
         evalSFrm sfrm ann args
       (E.Lst xs) ->
         evalLst ann xs
       _ ->
         throw Unknown ann
 
-evalSym :: forall a. E.Ann -> String -> Eval (Mu.Mu (E.ExprF a))
+evalSym :: E.Ann -> String -> Eval E.Expr
 evalSym ann name = do
   env <- getEnv
   case M.lookup name env of
@@ -87,9 +88,10 @@ evalSym ann name = do
     Nothing ->
       throw (UnknownVar name) ann
 
-evalSFrm :: forall a. E.SFrm -> E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalSFrm :: E.SFrm -> E.Ann -> List E.Expr -> Eval E.Expr
 evalSFrm _ ann Nil = throw NumArgs ann
 evalSFrm E.First ann args = evalFirst ann args
+evalSFrm _ ann _ = throw NumArgs ann
 evalSFrm E.Rest ann args = evalRest ann args
 evalSFrm E.If ann args = evalIf ann args
 evalSFrm E.Def ann args = evalDef ann args
@@ -99,36 +101,36 @@ evalSFrm E.IsEq ann args = evalIsEq ann args
 evalSFrm E.Quote ann args = evalQuote ann args
 evalSFrm E.Lambda ann args = evalLambda ann args
 
-evalFirst :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalFirst :: E.Ann -> List E.Expr -> Eval E.Expr
 evalFirst ann Nil = throw NumArgs ann
 evalFirst ann (Cons h _) =
-  case Mu.unroll h of
+  case E.unExpr h of
     E.Lst Nil ->
       throw LstLength ann
     E.Lst (Cons h _) ->
-      pure h
+      pure $ h
     _ -> throw WrongTipe ann
 
-evalRest :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalRest :: E.Ann -> List E.Expr -> Eval E.Expr
 evalRest ann Nil = throw NumArgs ann
 evalRest ann (Cons h _) =
-  case Mu.unroll h of
+  case E.unExpr h of
     E.Lst Nil ->
       pure h
     E.Lst (Cons _ t) ->
-      pure $ Mu.roll $ E.Lst t
+      pure $ E.mkExpr (E.Lst t) ann
     _ -> throw WrongTipe ann
 
-evalIf :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalIf :: E.Ann -> List E.Expr -> Eval E.Expr
 evalIf ann (Cons p (Cons e1 (Cons e2 _))) =
-  case Mu.unroll p of
+  case E.unExpr p of
     E.Lst Nil -> pure e2
     _ -> pure e1
 evalIf ann _ = throw NumArgs ann
 
-evalDef :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalDef :: E.Ann -> List E.Expr -> Eval E.Expr
 evalDef ann (Cons sym (Cons expr Nil)) =
-  case Mu.unroll sym of
+  case E.unExpr sym of
     E.Sym name -> do
       _ <- updateEnv name expr
       pure expr
@@ -136,83 +138,95 @@ evalDef ann (Cons sym (Cons expr Nil)) =
       throw WrongTipe ann
 evalDef ann _ = throw NumArgs ann
 
-evalCons :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalCons :: E.Ann -> List E.Expr -> Eval E.Expr
 evalCons ann (Cons h (Cons t Nil)) =
-  case Mu.unroll t of
+  case E.unExpr t of
     (E.Lst t) ->
-      pure $ Mu.roll $ E.Lst $ Cons h t
+      pure $ E.mkExpr (E.Lst (Cons h t)) ann
     _ ->
       throw WrongTipe ann
 evalCons ann _ = throw NumArgs ann
 
-evalIsAtm :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalIsAtm :: E.Ann -> List E.Expr -> Eval E.Expr
 evalIsAtm ann (Cons h Nil) =
-  case Mu.unroll h of
+  case E.unExpr h of
     E.Sym _ ->
-      pure $ Mu.roll $ E.Sym "t"
+      pure $ E.mkExpr (E.Sym "t") ann
     E.Lst Nil ->
-      pure $ Mu.roll $ E.Sym "t"
+      pure $ E.mkExpr (E.Sym "t") ann
     _ ->
-      pure $ Mu.roll $ E.Lst Nil
+      pure $ E.mkExpr (E.Lst Nil) ann
 evalIsAtm ann _ = throw NumArgs ann
 
-evalIsEq :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalIsEq :: E.Ann -> List E.Expr -> Eval E.Expr
 evalIsEq ann (Cons e1 (Cons e2 Nil)) =
-  case Tuple (Mu.unroll e1) (Mu.unroll e2) of
+  case Tuple (E.unExpr e1) (E.unExpr e2) of
     Tuple (E.Sym name1) (E.Sym name2) ->
       if name1 == name2
-      then pure $ Mu.roll $ E.Sym "t"
-      else pure $ Mu.roll $ E.Lst Nil
+      then pure $ E.mkExpr (E.Sym "t") ann
+      else pure $ E.mkExpr (E.Lst Nil) ann
     Tuple (E.Lst Nil) (E.Lst Nil) ->
-      pure $ Mu.roll $ E.Sym "t"
+      pure $ E.mkExpr (E.Sym "t") ann
     _ ->
-      pure $ Mu.roll $ E.Lst Nil
+      pure $ E.mkExpr (E.Lst Nil) ann
 evalIsEq ann _ = throw NumArgs ann
 
-evalLambda :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalLambda :: E.Ann -> List E.Expr -> Eval E.Expr
 evalLambda ann (Cons params (Cons body Nil)) =
-  case Mu.unroll params of
+  case E.unExpr params of
     E.Lst p -> do
       env <- getEnv
-      pure $ Mu.roll $ E.Fn env p body
+      pure $ E.mkExpr (E.Fn env p body) ann
     _ ->
       throw WrongTipe ann
 evalLambda ann _ = throw NumArgs ann
 
-evalQuote :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+evalQuote :: forall a. E.Ann -> List E.Expr -> Eval E.Expr
 evalQuote ann (Cons e Nil) = pure e
 evalQuote ann _ = throw NumArgs ann
 
-updateEnv :: forall a. String -> Mu.Mu (E.ExprF a) -> Eval Unit
+updateEnv :: String -> E.Expr -> Eval Unit
 updateEnv key val = do
   EvalState evalState <- S.get
   S.put $ EvalState (evalState { env = M.insert key val evalState.env })
 
-evalLst :: forall a. E.Ann -> List (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
-evalLst ann (Cons x xs) = throw NotImplemented ann
-{-
-  case Mu.unroll x of
+evalLst :: E.Ann -> List E.Expr -> Eval E.Expr
+evalLst ann (Cons x xs) =
+  case E.unExpr x of
     E.Fn localEnv params body -> do
       globalEnv <- getEnv
       let env = localEnv <> globalEnv
-      let expr = applyLambda params xs body
+      let expr = applyLambda ann params xs body
       evalInLocalEnv env expr
     _ ->
       throw NotFn ann
--}
 evalLst ann Nil = throw NumArgs ann
 
-{-
-applyLambda :: forall a. List (Mu.Mu (E.ExprF a)) -> List (Mu.Mu (E.ExprF a)) -> Mu.Mu (E.ExprF a) -> Eval (Mu.Mu (E.ExprF a))
-applyLambda params args body = do
-  env <- getEnv
-  let env' = M.fromFoldable (zipWith (\k v -> Tuple (toSymName (Mu.unroll k)) v) params args) <> env
-  let evalState = EvalState { env: env' }
-  EvalT $ mapExceptT (withStateT $ const evalState) body
-  where toSymName E.Sym name = name
+applyLambda :: E.Ann -> List E.Expr -> List E.Expr -> E.Expr -> Eval E.Expr
+applyLambda ann params args body = do
+  env <- bindArgs ann params args
+  let evalState = EvalState { env: env }
+  EvalT $ mapExceptT (withStateT $ const evalState) (pure body)
 
-evalInLocalEnv :: forall a. E.Env a -> Eval (Mu.Mu (E.ExprF a)) -> Eval (Mu.Mu (E.ExprF a))
+bindArgs :: E.Ann -> List E.Expr -> List E.Expr -> Eval (E.Env E.Expr)
+bindArgs ann params args = do
+  env <- getEnv
+  bindings <- sequence (zipWith toBinding params args)
+  pure $ M.fromFoldable bindings <> env
+  where
+    toBinding :: E.Expr -> E.Expr -> Eval (Tuple String E.Expr)
+    toBinding param arg = do
+      paramName <- toParamName param
+      pure $ Tuple paramName arg
+    toParamName :: E.Expr -> Eval String
+    toParamName param =
+      case E.unExpr' param of
+        E.ExprAnnF (E.Sym name) _ ->
+          pure name
+        E.ExprAnnF _ ann ->
+          throw Unknown ann
+
+evalInLocalEnv :: E.Env E.Expr -> Eval E.Expr -> Eval E.Expr
 evalInLocalEnv env (EvalT expr) = do
   let localState = EvalState { env: env }
   EvalT $ mapExceptT (withStateT $ const localState) expr
--}

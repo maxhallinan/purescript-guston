@@ -19,27 +19,27 @@ import Text.Parsing.Parser.Pos (Position(..))
 
 type Parser a = P.Parser String a
 
-parseStr :: forall a. String -> Either P.ParseError (List (E.Expr a))
+parseStr :: forall a. String -> Either P.ParseError (List E.Expr)
 parseStr = flip P.runParser program
 
-program :: forall a. Parser (List (E.Expr a))
+program :: forall a. Parser (List E.Expr)
 program = C.between lexer.whiteSpace S.eof exprs
   where exprs = C.sepBy expr lexer.whiteSpace
 
-expr :: forall a. Parser (E.Expr a)
+expr :: forall a. Parser E.Expr
 expr = fix $ \p -> symbol <|> quoted p <|> listOf p
 
-listOf :: forall a. Parser (E.Expr a) -> Parser (E.Expr a)
+listOf :: forall a. Parser E.Expr -> Parser E.Expr
 listOf p = exprOf $ E.Lst <$> lexer.parens (manyRec p)
 
-quoted :: forall a. Parser (E.Expr a) -> Parser (E.Expr a)
+quoted :: forall a. Parser E.Expr -> Parser E.Expr
 quoted p = exprOf $ do
   _ <- S.string "'"
   quote <- exprOf $ pure (E.SFrm E.Quote)
   x <- p
   pure $ E.Lst (Cons quote (pure x))
 
-symbol :: forall a. Parser (E.Expr a)
+symbol :: forall a. Parser E.Expr
 symbol = exprOf $ do
   identifier <- lexer.identifier
   case identifier of
@@ -64,7 +64,7 @@ symbol = exprOf $ do
     _ ->
       pure $ E.Sym identifier
 
-exprOf :: forall a. Parser (E.ExprF a (E.Expr a)) -> Parser (E.Expr a)
+exprOf :: forall a. Parser (E.ExprF E.Expr) -> Parser E.Expr
 exprOf = map (M.roll <<< Compose) <<< annotate
 
 annotate :: forall a. Parser a -> Parser (E.ExprAnnF a)
