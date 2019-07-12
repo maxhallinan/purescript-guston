@@ -7,22 +7,46 @@ module Expr
   , Location
   , Position
   , SFrm(..)
+  , ShowExpr(..)
   , mkExpr
   , unExpr
   , unExpr'
+  , unExprAnnF
   ) where
 
 import Prelude
 
+import Control.Apply (apply, lift3)
 import Data.Functor.Compose (Compose(..))
 import Data.List (List)
 import Data.Map as M
 import Data.Newtype (class Newtype, unwrap)
-import Data.Traversable (class Foldable, class Traversable, traverseDefault, sequenceDefault, foldl, foldr, foldMap)
+import Data.Foldable (intercalate)
+import Data.Traversable (class Foldable, class Traversable, traverse, traverseDefault, sequenceDefault, foldl, foldr, foldMap)
 import Mu (Mu, roll, unroll)
 import Util (concatStrings, unwords)
+import Recursive (Algebra, cata)
+
+newtype ShowExpr = ShowExpr Expr
 
 type Expr = Mu (Compose ExprAnnF ExprF)
+
+derive instance newtypeExpr :: Newtype ShowExpr _
+
+instance showExpr :: Show ShowExpr where
+  show = cata showExpr' <<< unwrap
+    where
+    showExpr' :: Algebra (Compose ExprAnnF ExprF) String
+    showExpr' expr = 
+      case unExprAnnF (unwrap expr) of
+        Sym name ->
+          name
+        SFrm sfrm ->
+          show sfrm
+        Fn _ _ _ ->
+          "<function>"
+        Lst xs ->
+          "(" <> intercalate " " xs <> ")"
 
 data ExprAnnF a = ExprAnnF a Ann
 
@@ -46,11 +70,13 @@ instance foldableExprAnnF :: Foldable ExprAnnF where
   foldMap f (ExprAnnF x _) = f x
 
 instance traversableExprAnnF :: Traversable ExprAnnF where
-  traverse = traverseDefault
+  traverse f (ExprAnnF a ann) = map (\b -> ExprAnnF b ann) $ f a
   sequence = sequenceDefault
 
+{-
 instance showExprAnnF :: Show a => Show (ExprAnnF a) where
   show (ExprAnnF x _) = show x
+-}
 
 newtype Ann = Ann { location :: Location }
 
@@ -85,14 +111,25 @@ instance foldableExprF :: Foldable ExprF where
   foldMap f (Lst xs) = foldMap f xs
 
 instance traversableExprF :: Traversable ExprF where
-  traverse = traverseDefault
+  traverse f (Sym name) = pure (Sym name)
+  traverse f (SFrm sfrm) = pure (SFrm sfrm)
+  traverse f (Fn env params body) = 
+    lift3 (\e p b -> (Fn e p b)) env' params' body'
+    where env' = traverse f env
+          params' = traverse f params
+          body' = f body
+  traverse f (Lst xs) = apply (pure Lst) xs'
+    where xs' = traverse f xs
+
   sequence = sequenceDefault
 
+{-
 instance showExprF :: Show a => Show (ExprF a) where
   show (Sym s) = s
   show (SFrm sform) = show sform
   show (Fn _ _ _) = "<function>"
   show (Lst xs) = concatStrings [ "(", unwords $ show <$> xs ,")"]
+-}
 
 data SFrm
   = First
